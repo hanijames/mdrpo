@@ -12,8 +12,8 @@ class Config:
     max_iters: int = 25
 
     num_targets_list: List[int] = field(default_factory=lambda: [5, 10, 15, 20, 25])
-    num_obstacles_list: List[int] = field(default_factory=lambda: [20, 10, 15, 20, 25])
-    seeds: List[int] = field(default_factory=lambda: list(range(12, 25)))
+    num_obstacles_list: List[int] = field(default_factory=lambda: [5, 10, 15, 20, 25])
+    seeds: List[int] = field(default_factory=lambda: list(range(25)))
 
     orig: tuple = (-10.0, -10.0)
     dest: tuple = (-10.0, -10.0)
