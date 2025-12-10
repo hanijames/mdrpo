@@ -69,10 +69,13 @@ def plot_iter(
         labeled_L = labeled_R = False
         for k in range(len(order)):
             if k < len(cL) and k < len(rL) and rL[k] > 0:
-                ax.add_patch(plt.Circle(cL[k], rL[k], edgecolor="blue", facecolor="none", linestyle=":", linewidth=1.5, zorder=4, label=None if labeled_L else "Launch Freedom"))
+                ax.add_patch(plt.Circle(cL[k], rL[k], edgecolor="blue", facecolor="none", linestyle=(0, (1,3)),
+                                        linewidth=1.5, zorder=4, label=None if labeled_L else "Launch Freedom"))
                 labeled_L = True
             if k < len(cR) and k < len(rR) and rR[k] > 0:
-                ax.add_patch(plt.Circle(cR[k], rR[k], edgecolor="red", facecolor="none", linestyle=":", linewidth=1.5, zorder=4, label=None if labeled_R else "Landing Freedom"))
+                # ax.add_patch(plt.Circle(cR[k], rR[k], edgecolor="red", facecolor="none", linestyle=":", linewidth=1.5, zorder=4, label=None if labeled_R else "Landing Freedom"))
+                ax.add_patch(plt.Circle(cR[k], rR[k], edgecolor="red", facecolor="none", linestyle=(2, (1, 3)),
+                                        linewidth=1.5, zorder=4, label=None if labeled_R else "Landing Freedom"))
                 labeled_R = True
 
     def _plot_leg(p, q, label=None):

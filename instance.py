@@ -28,10 +28,53 @@ def union_contains(p: Point, obstacles: List[Obstacle]) -> bool:
     return any(point_in_poly(p, o.verts) for o in obstacles)
 
 
+def point_to_segment_distance(p: Point, a: Point, b: Point) -> float:
+    """Compute minimum distance from point p to line segment a-b."""
+    ax, ay = a
+    bx, by = b
+    px, py = p
+
+    dx, dy = bx - ax, by - ay
+    if dx == 0 and dy == 0:
+        return math.sqrt((px - ax) ** 2 + (py - ay) ** 2)
+
+    t = max(0, min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
+    proj_x = ax + t * dx
+    proj_y = ay + t * dy
+    return math.sqrt((px - proj_x) ** 2 + (py - proj_y) ** 2)
+
+
+def polygon_min_distance(verts1: List[Point], verts2: List[Point]) -> float:
+    """Compute minimum distance between two convex polygons."""
+    min_dist = float('inf')
+
+    # Check all vertices of poly1 against all edges of poly2
+    n2 = len(verts2)
+    for v in verts1:
+        for j in range(n2):
+            d = point_to_segment_distance(v, verts2[j], verts2[(j + 1) % n2])
+            min_dist = min(min_dist, d)
+
+    # Check all vertices of poly2 against all edges of poly1
+    n1 = len(verts1)
+    for v in verts2:
+        for i in range(n1):
+            d = point_to_segment_distance(v, verts1[i], verts1[(i + 1) % n1])
+            min_dist = min(min_dist, d)
+
+    return min_dist
+
+
+OBSTACLE_BUFFER = 0.5
+
+
 def generate_obstacles(num_obst: int, seed: int) -> List[Obstacle]:
     rng = random.Random(seed)
     obstacles: List[Obstacle] = []
-    for _ in range(num_obst):
+    max_attempts = 1000
+    attempts = 0
+    while len(obstacles) < num_obst and attempts < max_attempts:
+        attempts += 1
         k = rng.randint(3, 8)
         cx, cy = rng.uniform(0, 100), rng.uniform(0, 100)
         R = rng.uniform(3, 5)
@@ -40,7 +83,17 @@ def generate_obstacles(num_obst: int, seed: int) -> List[Obstacle]:
         for i in range(k):
             ang = theta0 + 2 * math.pi * i / k
             verts.append((cx + R * math.cos(ang), cy + R * math.sin(ang)))
-        obstacles.append(Obstacle(verts))
+
+        too_close = any(
+            polygon_min_distance(verts, obs.verts) < OBSTACLE_BUFFER
+            for obs in obstacles
+        )
+        if not too_close:
+            obstacles.append(Obstacle(verts))
+
+    if len(obstacles) < num_obst:
+        print(f"Warning: only generated {len(obstacles)} non-overlapping obstacles (requested {num_obst})")
+
     return obstacles
 
 
@@ -61,13 +114,13 @@ def auto_instance_name(n_obstacles: int, n_targets: int, seed: int, R: float) ->
 
 
 def make_instance(
-    num_obst: int,
-    num_targets: int,
-    seed: int,
-    alpha: float = 2.0,
-    R: float = 20.0,
-    orig: Point = (-10.0, -10.0),
-    dest: Point = (-10.0, -10.0)
+        num_obst: int,
+        num_targets: int,
+        seed: int,
+        alpha: float = 2.0,
+        R: float = 20.0,
+        orig: Point = (-10.0, -10.0),
+        dest: Point = (-10.0, -10.0)
 ) -> Instance:
     obstacles = generate_obstacles(num_obst, seed)
     targets = generate_targets_on_land(num_targets, obstacles, seed + 2)
