@@ -2,7 +2,7 @@ import os
 import time
 
 from config import Config
-from instance import make_instance, save_instance_json
+from instance import make_instance, save_instance_json, load_instance_json
 from initial_solution import initial_solution
 from socp_refinement import refine_by_socp
 from visibility import freedom_radius
@@ -16,23 +16,8 @@ def dbg(msg: str):
         print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
-def run_single(num_obst: int, num_targets: int, seed: int):
-    dbg(f"Running T={num_targets}, O={num_obst}, seed={seed}")
-
-    run_dir = os.path.join(config.plots_dir, f"T{num_targets}_O{num_obst}_seed{seed}")
-    os.makedirs(run_dir, exist_ok=True)
-
-    inst = make_instance(
-        num_obst, num_targets, seed,
-        alpha=config.alpha, R=config.R_endurance,
-        orig=config.orig, dest=config.dest
-    )
-
-    inst_path = os.path.join(config.instance_info_dir, f"{inst.name}.json")
-    os.makedirs(config.instance_info_dir, exist_ok=True)
-    save_instance_json(inst, inst_path)
-    dbg(f"  Saved instance to {inst_path}")
-
+def _run_instance(inst, run_dir):
+    """Core solve logic shared by run_single and run_custom."""
     dbg("  Computing initial solution...")
     res0 = initial_solution(
         inst,
@@ -108,8 +93,6 @@ def run_single(num_obst: int, num_targets: int, seed: int):
     if not progress:
         best_obj = init_obj
 
-    append_results_csv(num_targets, num_obst, seed, init_obj, best_obj, config.results_dir)
-
     reduction = (init_obj - best_obj) / init_obj if init_obj > 0 else 0.0
     dbg(f"  Done: init={init_obj:.3f}, best={best_obj:.3f}, reduction={reduction:.1%}")
 
@@ -122,14 +105,66 @@ def run_single(num_obst: int, num_targets: int, seed: int):
     }
 
 
+def run_single(num_obst: int, num_targets: int, seed: int):
+    dbg(f"Running T={num_targets}, O={num_obst}, seed={seed}")
+
+    run_dir = os.path.join(config.plots_dir, f"T{num_targets}_O{num_obst}_seed{seed}")
+    os.makedirs(run_dir, exist_ok=True)
+
+    inst_name = f"T{num_targets}_O{num_obst}_S{seed}"
+    inst_path = os.path.join(config.instance_info_dir, f"{inst_name}.json")
+    os.makedirs(config.instance_info_dir, exist_ok=True)
+
+    if os.path.exists(inst_path):
+        inst = load_instance_json(inst_path, alpha=config.alpha, R=config.R_endurance,
+                                  orig=config.orig, dest=config.dest)
+        dbg(f"  Loaded instance from {inst_path}")
+    else:
+        inst = make_instance(
+            num_obst, num_targets, seed,
+            alpha=config.alpha, R=config.R_endurance,
+            orig=config.orig, dest=config.dest
+        )
+        save_instance_json(inst, inst_path)
+        dbg(f"  Saved instance to {inst_path}")
+
+    result = _run_instance(inst, run_dir)
+    append_results_csv(num_targets, num_obst, seed, result["init_obj"], result["best_obj"], config.results_dir)
+    return result
+
+
+def run_custom(inst_name: str):
+    dbg(f"Running custom instance: {inst_name}")
+
+    run_dir = os.path.join(config.plots_dir, inst_name)
+    os.makedirs(run_dir, exist_ok=True)
+
+    inst_path = os.path.join(config.custom_instances_dir, f"{inst_name}.json")
+    if not os.path.exists(inst_path):
+        raise FileNotFoundError(f"Custom instance not found: {inst_path}")
+
+    inst = load_instance_json(inst_path, alpha=config.alpha, R=config.R_endurance,
+                              orig=config.orig, dest=config.dest)
+    dbg(f"  Loaded instance from {inst_path}")
+
+    return _run_instance(inst, run_dir)
+
+
 def main():
     dbg("=== RUN START ===")
     results = []
-    for num_targets in config.num_targets_list:
-        for num_obst in config.num_obstacles_list:
-            for seed in config.seeds:
-                result = run_single(num_obst, num_targets, seed)
-                results.append(result)
+
+    if config.custom_instances:
+        for inst_name in config.custom_instances:
+            result = run_custom(inst_name)
+            results.append(result)
+    else:
+        for num_targets in config.num_targets_list:
+            for num_obst in config.num_obstacles_list:
+                for seed in config.seeds:
+                    result = run_single(num_obst, num_targets, seed)
+                    results.append(result)
+
     dbg("=== RUN END ===")
     return results
 
