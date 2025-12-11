@@ -138,3 +138,29 @@ def save_instance_json(instance: Instance, path: str) -> None:
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2, sort_keys=False)
         f.write("\n")
+
+
+def load_instance_json(path: str, alpha: float = 2.0, R: float = 20.0,
+                       orig: Point = (-10.0, -10.0), dest: Point = (-10.0, -10.0)) -> Instance:
+    with open(path, "r") as f:
+        data = json.load(f)
+
+    depot = tuple(data.get("depot", orig))
+
+    obstacles = []
+    i = 1
+    while f"obstacle_{i}" in data:
+        verts = [tuple(v) for v in data[f"obstacle_{i}"]]
+        obstacles.append(Obstacle(verts))
+        i += 1
+
+    targets = []
+    i = 1
+    while f"target_{i}" in data:
+        targets.append(tuple(data[f"target_{i}"]))
+        i += 1
+
+    name = os.path.splitext(os.path.basename(path))[0]
+
+    return Instance(orig=depot, dest=dest, alpha=alpha, R=R,
+                    obstacles=obstacles, targets=targets, name=name)
