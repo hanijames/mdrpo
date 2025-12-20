@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 
 @dataclass
@@ -11,6 +11,8 @@ class Config:
     shrink_freedom: float = 1.0  # SOCP freedom region as fraction of distance to nearest obstacle
     obs_margin: float = 0.1  # distance subtracted from freedom radii to prevent strange behavior
     max_iters: int = 25
+    reorder_iters: int = 10  # Run this many SOCP iters before checking if TSP order changed
+    max_reorder_attempts: int = 2  # Max times to restart if order changes (0 to disable reordering)
 
     num_targets_list: List[int] = field(default_factory=lambda: [5, 10, 15, 20, 25])
     num_obstacles_list: List[int] = field(default_factory=lambda: [5, 10, 15, 20, 25])
@@ -18,8 +20,8 @@ class Config:
     seeds: List[int] = field(default_factory=lambda: list(range(25)))
 
     # Custom instances: if non-empty, run these instead of random grid
-    custom_instances: List[str] = field(default_factory=list)
-    # custom_instances: List[str] = field(default_factory=lambda: ["fig5_approx_instance"])
+    # custom_instances: List[str] = field(default_factory=list)
+    custom_instances: List[str] = field(default_factory=lambda: ["pentagon_pyramid"])
     custom_instances_dir: str = "custom_instances"
 
     orig: tuple = (-10.0, -10.0)

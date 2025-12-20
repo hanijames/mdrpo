@@ -8,12 +8,26 @@ from socp_refinement import refine_by_socp
 from visibility import freedom_radius
 from plotting import plot_iter, append_results_csv
 
+import csv
+
 config = Config()
 
 
 def dbg(msg: str):
     if config.debug:
         print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def append_reorder_csv(num_targets: int, num_obst: int, seed: int, num_attempts: int, results_dir: str = ".", instance_name: str = None):
+    fname = "reorder_attempts.csv"
+    p = os.path.join(results_dir, fname)
+    need_header = not os.path.exists(p)
+    with open(p, "a", newline="") as f:
+        w = csv.writer(f)
+        if need_header:
+            w.writerow(["instance_name", "num_targets", "num_obstacles", "seed", "num_attempts"])
+        name = instance_name if instance_name else f"T{num_targets}_O{num_obst}_S{seed}"
+        w.writerow([name, num_targets, num_obst, seed, num_attempts])
 
 
 def _run_instance(inst, run_dir):
@@ -33,6 +47,8 @@ def _run_instance(inst, run_dir):
     base_adj = res0["base_adj"]
     Dvv = res0["Dvv"]
     Next = res0["Next"]
+
+    current_order = list(order)
 
     if config.make_plots:
         iter0_gtsp = os.path.join(run_dir, "iter_00_gtsp.png")
@@ -62,11 +78,14 @@ def _run_instance(inst, run_dir):
             route_info_dir=config.route_info_dir
         )
 
-    def on_iteration(it, obj_value, Ls_now, Rs_now, launch_freedom, return_freedom, launch_prev, return_prev):
+    def on_iteration(it, obj_value, Ls_now, Rs_now, launch_freedom, return_freedom, launch_prev, return_prev, iter_order=None):
+        nonlocal current_order
+        if iter_order is not None:
+            current_order = list(iter_order)
         if config.make_plots:
             fname = os.path.join(run_dir, f"iter_{it:02d}.png")
             plot_iter(
-                inst, order, Ls_now, Rs_now,
+                inst, current_order, Ls_now, Rs_now,
                 base_verts, base_adj, Dvv, Next,
                 filename=fname, show_circles=False,
                 title=f"Iter {it:02d}",
@@ -78,7 +97,10 @@ def _run_instance(inst, run_dir):
             )
 
     dbg("  Starting SOCP iterations...")
-    progress, best_obj, best_iter = refine_by_socp(
+    if config.max_reorder_attempts > 0:
+        dbg(f"  (Will check TSP order after {config.reorder_iters} iters, up to {config.max_reorder_attempts} restarts)")
+    
+    progress, best_obj, best_iter, num_attempts = refine_by_socp(
         inst, order, chosen_launch, chosen_return,
         max_iters=config.max_iters,
         shrink_freedom=config.shrink_freedom,
@@ -86,7 +108,9 @@ def _run_instance(inst, run_dir):
         base_adj=base_adj,
         Dvv=Dvv,
         init_obj=res0["Init Obj"],
-        on_iteration=on_iteration
+        on_iteration=on_iteration,
+        reorder_iters=config.reorder_iters,
+        max_reorder_attempts=config.max_reorder_attempts
     )
 
     init_obj = res0["Init Obj"]
@@ -94,14 +118,15 @@ def _run_instance(inst, run_dir):
         best_obj = init_obj
 
     reduction = (init_obj - best_obj) / init_obj if init_obj > 0 else 0.0
-    dbg(f"  Done: init={init_obj:.3f}, best={best_obj:.3f}, reduction={reduction:.1%}")
+    dbg(f"  Done: init={init_obj:.3f}, best={best_obj:.3f}, reduction={reduction:.1%}, attempts={num_attempts}")
 
     return {
         "instance": inst,
         "init_obj": init_obj,
         "best_obj": best_obj,
         "best_iter": best_iter,
-        "order": order
+        "order": current_order,
+        "num_attempts": num_attempts
     }
 
 
@@ -130,6 +155,7 @@ def run_single(num_obst: int, num_targets: int, seed: int):
 
     result = _run_instance(inst, run_dir)
     append_results_csv(num_targets, num_obst, seed, result["init_obj"], result["best_obj"], config.results_dir)
+    append_reorder_csv(num_targets, num_obst, seed, result["num_attempts"], config.results_dir)
     return result
 
 
@@ -147,7 +173,10 @@ def run_custom(inst_name: str):
                               orig=config.orig, dest=config.dest)
     dbg(f"  Loaded instance from {inst_path}")
 
-    return _run_instance(inst, run_dir)
+    result = _run_instance(inst, run_dir)
+    append_reorder_csv(len(inst.targets), len(inst.obstacles), 0, result["num_attempts"], 
+                       config.results_dir, instance_name=inst_name)
+    return result
 
 
 def main():
