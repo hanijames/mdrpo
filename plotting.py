@@ -13,7 +13,6 @@ from instance import Instance
 from visibility import first_last_turn, reconstruct_vertex_path, wet_polyline
 from initial_solution import ring_radius
 
-
 def plot_iter(
     instance: Instance,
     order: List[int],
@@ -203,7 +202,6 @@ def _write_route_csv(instance: Instance, order: List[int], Ls: List[Point], Rs: 
         w.writerow([f"Total Time: ", f"{ship_dist + ship_wait_time:.3f}", "", "", "", ""])
         if obj_value is not None:
             w.writerow([f"SOCP Objective: ", f"{obj_value:.3f}", "", "", "", ""])
-
 
 def append_results_csv(num_targets: int, num_obst: int, seed: int, init_obj: float, best_obj: float, results_dir: str = "."):
     fname = f"results_T{num_targets}_O{num_obst}.csv"

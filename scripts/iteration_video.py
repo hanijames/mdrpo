@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-"""Generate a video showing iteration progression for a single instance."""
-
 import re
 from pathlib import Path
 import numpy as np
@@ -10,13 +7,10 @@ from matplotlib.animation import FuncAnimation, PillowWriter, FFMpegWriter
 
 # === CONFIGURATION ===
 PLOTS_DIR = "../R20_Alpha2/plots"
-SECONDS_PER_IMAGE = 1
-FADE_DURATION = 0.5
-FPS = 30
-
-
+SECONDS_PER_IMAGE = 0.5
+FADE_DURATION = 1.0
+FPS = 10
 # =====================
-
 
 def generate_iteration_video(plots_dir, targets, obstacles, seed, seconds_per_image=1.5, fade_duration=0.5, fps=30):
     base_path = Path(plots_dir)
@@ -99,11 +93,10 @@ def generate_iteration_video(plots_dir, targets, obstacles, seed, seconds_per_im
 
     plt.close(fig)
 
-
 if __name__ == "__main__":
-    targets_list = [5]
-    obstacles_list = [15]
-    seeds = [15]
+    targets_list = [25]
+    obstacles_list = [25]
+    seeds = [23]
 
     for targets in targets_list:
         for obstacles in obstacles_list:

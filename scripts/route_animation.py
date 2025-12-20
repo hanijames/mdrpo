@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-"""Generate an MP4 animation of the final route for a single instance."""
-
 import json
 import os
 import numpy as np
@@ -14,16 +11,15 @@ import matplotlib.patches as mpatches
 INSTANCE_INFO_DIR = "../R20_Alpha2/instance_info"
 ROUTE_INFO_DIR = "../R20_Alpha2/route_info"
 OUTPUT_DIR = "../R20_Alpha2/animations"
-TARGETS = 5
-OBSTACLES = 15
-SEED = 15
+TARGETS_LIST = [25]
+OBSTACLES_LIST = [25]
+SEED_LIST = [23]
 ALPHA = 2.0
 FPS = 30
+PLAYBACK_SPEED = 5
 # =====================
 
-
-def load_svg_marker(svg_filename):
-    """Load an SVG file and extract the path."""
+def load_svg_marker(svg_filename, svgpath2mpl=None):
     try:
         from svgpath2mpl import parse_path
         import xml.etree.ElementTree as ET
@@ -40,18 +36,17 @@ def load_svg_marker(svg_filename):
     except Exception:
         return None
 
-
 def create_boat_marker():
     marker = load_svg_marker('svg_files/boat.svg')
     if marker:
         return marker
+    # backup if svg doesn't load
     verts = [
         (0., 0.6), (-0.25, 0.2), (-0.35, -0.3), (-0.3, -0.5),
         (0.3, -0.5), (0.35, -0.3), (0.25, 0.2), (0., 0.6),
     ]
     codes = [Path.MOVETO] + [Path.LINETO] * 6 + [Path.CLOSEPOLY]
     return Path(verts, codes)
-
 
 def create_drone_marker():
     marker = load_svg_marker('svg_files/drone.svg')
@@ -66,22 +61,18 @@ def create_drone_marker():
     codes = [Path.MOVETO] + [Path.LINETO] * 12 + [Path.CLOSEPOLY]
     return Path(verts, codes)
 
-
 def calculate_heading(p1, p2):
     dx = p2[0] - p1[0]
     dy = p2[1] - p1[1]
-    return np.degrees(np.arctan2(dx, dy))
-
+    return -np.degrees(np.arctan2(dx, dy))
 
 def parse_point(s):
     s = s.strip().strip('()').replace('"', '').replace("'", '')
     parts = s.split(',')
     return (float(parts[0]), float(parts[1]))
 
-
 def distance(p1, p2):
     return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
-
 
 def load_instance_data(json_path, csv_path, alpha):
     with open(json_path, 'r') as f:
@@ -174,55 +165,74 @@ def load_instance_data(json_path, csv_path, alpha):
             except ValueError:
                 pass
 
-    mothership_times = [0.0]
-    for i in range(1, len(mothership_points)):
-        d = distance(mothership_points[i-1], mothership_points[i])
-        mothership_times.append(mothership_times[-1] + d)
-
+    segment_distances = []
+    for i in range(len(mothership_points)-1):
+        segment_distances.append(distance(mothership_points[i], mothership_points[i+1]))
     drone_trips = []
     for launch in drone_launches:
         if 'return_point' not in launch:
             continue
 
-        drone_total = launch['drone_out'] + launch['drone_return']
-        drone_time = drone_total / alpha
+        launch_idx = launch['point_idx']
+        return_idx = launch['return_idx']
+        ship_dist = sum(segment_distances[launch_idx:return_idx])
+        drone_time = (launch['drone_out'] + launch['drone_return']) / alpha
 
-        launch_time = mothership_times[launch['point_idx']]
-        return_time = mothership_times[launch['return_idx']]
-        ship_time = return_time - launch_time
-
-        sync_time = max(drone_time, ship_time)
+        if drone_time > ship_dist and ship_dist > 0:
+            ship_speed_factor = ship_dist / drone_time
+            drone_speed_factor = 1.0
+        elif ship_dist > 0:
+            ship_speed_factor = 1.0
+            drone_speed_factor = drone_time / ship_dist
+        else:
+            ship_speed_factor = 1.0
+            drone_speed_factor = 1.0
 
         drone_trips.append({
-            'launch_idx': launch['point_idx'],
-            'return_idx': launch['return_idx'],
+            'launch_idx': launch_idx,
+            'return_idx': return_idx,
             'launch_point': launch['launch_point'],
             'return_point': launch['return_point'],
             'target': launch['target'],
             'drone_out': launch['drone_out'],
             'drone_return': launch['drone_return'],
-            'drone_speed': alpha,
-            'sync_time': sync_time
+            'drone_speed': alpha * drone_speed_factor * PLAYBACK_SPEED,
+            'ship_speed_factor': ship_speed_factor,
         })
 
-    total_time = mothership_times[-1]
+    segment_times = []
+    for i in range(len(segment_distances)):
+        speed_factor = 1.0
+        for trip in drone_trips:
+            if trip['launch_idx'] <= i < trip['return_idx']:
+                speed_factor = min(speed_factor, trip['ship_speed_factor'])
+        segment_times.append(segment_distances[i] / speed_factor)
+
+    wait_at_waypoint = {}
     for trip in drone_trips:
-        launch_time = mothership_times[trip['launch_idx']]
-        drone_time = (trip['drone_out'] + trip['drone_return']) / alpha
-        ship_time = mothership_times[trip['return_idx']] - launch_time
-        if drone_time > ship_time:
-            total_time += (drone_time - ship_time)
+        ship_dist = sum(segment_distances[trip['launch_idx']:trip['return_idx']])
+        if ship_dist == 0:
+            drone_time = (trip['drone_out'] + trip['drone_return']) / alpha
+            wait_at_waypoint[trip['return_idx']] = drone_time
+
+    adjusted_times =[0.0]
+    for i, seg_time in enumerate(segment_times):
+        wait = wait_at_waypoint.get(i+1, 0.0)
+        adjusted_times.append(adjusted_times[-1] + (seg_time + wait) / PLAYBACK_SPEED)
+
+    for trip in drone_trips:
+        trip['actual_launch_time'] = adjusted_times[trip['launch_idx']]
+        trip['actual_return_time'] = adjusted_times[trip['return_idx']]
 
     return {
         'obstacles': obstacles,
         'targets': targets,
         'depot': depot,
         'mothership_points': mothership_points,
-        'mothership_times': mothership_times,
+        'mothership_times': adjusted_times,
         'drone_trips': drone_trips,
-        'total_time': total_time
+        'total_time': adjusted_times[-1],
     }
-
 
 def create_animation(targets, obstacles, seed, instance_info_dir, route_info_dir, output_dir, alpha, fps):
     instance_name = f"T{targets}_O{obstacles}_S{seed}"
@@ -251,20 +261,20 @@ def create_animation(targets, obstacles, seed, instance_info_dir, route_info_dir
     ax.grid(False)
 
     for obs_coords in data['obstacles']:
-        poly = Polygon(obs_coords, facecolor='gray', edgecolor='darkgray', alpha=0.5, zorder=2)
+        poly = Polygon(obs_coords, facecolor='#bbbbbb', edgecolor='#888888', alpha=0.8, linewidth=2, zorder=2)
         ax.add_patch(poly)
 
     depot = data['depot']
-    ax.plot(depot[0], depot[1], 's', color='purple', markersize=15, label='Depot', zorder=10)
+    ax.scatter([depot[0]], [depot[1]], s=80, marker='s', color='purple', label='Depot', zorder=8)
 
     for i, target in enumerate(data['targets']):
         label = 'Target' if i == 0 else None
-        ax.plot(target[0], target[1], 'x', color='purple', markersize=12, markeredgewidth=3, label=label, zorder=10)
+        ax.scatter([target[0]], [target[1]], s=40, marker='x', color='purple', label=label, zorder=8)
 
     boat_path = create_boat_marker()
     drone_path = create_drone_marker()
 
-    mothership_line, = ax.plot([], [], '-', linewidth=3, color='black', label='Mothership', zorder=5)
+    mothership_line, = ax.plot([], [], '-', linewidth=2.0, color='black', label='Mothership', zorder=5)
     mothership_marker = mpatches.PathPatch(boat_path, facecolor='black', edgecolor='white', linewidth=1, zorder=6)
     ax.add_patch(mothership_marker)
 
@@ -273,8 +283,8 @@ def create_animation(targets, obstacles, seed, instance_info_dir, route_info_dir
     drone_return_lines = []
 
     for i in range(max_drones):
-        line_out, = ax.plot([], [], '--', linewidth=2, color='blue', label='Drone Out' if i == 0 else None, zorder=6)
-        line_ret, = ax.plot([], [], '--', linewidth=2, color='red', label='Drone Return' if i == 0 else None, zorder=6)
+        line_out, = ax.plot([], [], '--', linewidth=1.5, color='blue', label='Drone Out' if i == 0 else None, zorder=6)
+        line_ret, = ax.plot([], [], '--', linewidth=1.5, color='red', label='Drone Return' if i == 0 else None, zorder=6)
         drone_out_lines.append(line_out)
         drone_return_lines.append(line_ret)
 
@@ -328,8 +338,8 @@ def create_animation(targets, obstacles, seed, instance_info_dir, route_info_dir
         drone_is_flying = False
 
         for i, trip in enumerate(drone_trips):
-            launch_time = mothership_times[trip['launch_idx']]
-            return_time = launch_time + trip['sync_time']
+            launch_time = trip['actual_launch_time']
+            return_time = trip['actual_return_time']
 
             if current_time < launch_time:
                 drone_out_lines[i].set_data([], [])
@@ -389,6 +399,8 @@ def create_animation(targets, obstacles, seed, instance_info_dir, route_info_dir
 
     plt.close(fig)
 
-
 if __name__ == "__main__":
-    create_animation(TARGETS, OBSTACLES, SEED, INSTANCE_INFO_DIR, ROUTE_INFO_DIR, OUTPUT_DIR, ALPHA, FPS)
+    for targets in TARGETS_LIST:
+        for obstacles in OBSTACLES_LIST:
+            for seed in SEED_LIST:
+                create_animation(targets, obstacles, seed, INSTANCE_INFO_DIR, ROUTE_INFO_DIR, OUTPUT_DIR, ALPHA, FPS)
