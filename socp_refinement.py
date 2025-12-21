@@ -1,5 +1,6 @@
 import math
 from typing import List, Dict, Tuple, Optional, Callable
+from dataclasses import dataclass, field
 
 import numpy as np
 import cvxpy as cp
@@ -8,6 +9,18 @@ from geometry import Point, dist
 from instance import Instance
 from visibility import freedom_radius, first_last_turn, wet_distance, wet_route_cost_via_Dvv
 import gtsp_lk
+
+
+@dataclass
+class AttemptResult:
+    """Results from a single SOCP attempt."""
+    attempt_num: int
+    order: List[int]
+    best_obj: float
+    best_iter: int
+    final_Ls: List[Point]
+    final_Rs: List[Point]
+    recs: List[Dict] = field(default_factory=list)
 
 
 def solve_tsp_on_launches(
@@ -57,15 +70,13 @@ def _run_socp_iterations(
     launch_cur: List[List[float]],
     return_cur: List[List[float]],
     num_iters: int,
-    iter_offset: int,
     shrink_freedom: float,
     base_verts,
     Dvv: np.ndarray,
-    best_val: float,
-    best_iter: int,
     on_iteration: Optional[Callable],
     recs: List[Dict],
-    return_points: bool
+    return_points: bool,
+    attempt_num: int = 1
 ) -> Tuple[float, int, bool]:
     """
     Run a fixed number of SOCP iterations. Returns (best_val, best_iter, success).
@@ -73,10 +84,11 @@ def _run_socp_iterations(
     """
     target = [instance.targets[i] for i in order]
     n = len(target)
+    
+    best_val = float("inf")
+    best_iter = 0
 
-    for local_it in range(1, num_iters + 1):
-        it = iter_offset + local_it
-
+    for it in range(1, num_iters + 1):
         launch_prev = [(float(launch_cur[i][0]), float(launch_cur[i][1])) for i in range(n)]
         return_prev = [(float(return_cur[i][0]), float(return_cur[i][1])) for i in range(n)]
 
@@ -144,7 +156,7 @@ def _run_socp_iterations(
             return_cur[i] = [Rs_now[i][0], Rs_now[i][1]]
 
         if on_iteration is not None:
-            on_iteration(it, obj_value, Ls_now, Rs_now, launch_freedom, return_freedom, launch_prev, return_prev, order)
+            on_iteration(attempt_num, it, obj_value, Ls_now, Rs_now, launch_freedom, return_freedom, launch_prev, return_prev, order)
 
         rec = {"iter": it, "obj": obj_value, "order": order[:]}
         if return_points:
@@ -174,118 +186,86 @@ def refine_by_socp(
     init_obj: Optional[float] = None,
     return_points: bool = False,
     on_iteration=None,
-    reorder_iters: int = 10,
     max_reorder_attempts: int = 2
-) -> Tuple[List[Dict], float, int, int]:
+) -> Tuple[List[AttemptResult], int]:
     """
     Refine launch/return points via successive SOCP iterations.
     
-    After reorder_iters iterations, solve TSP on launch locations. If the order
-    changes, restart SOCP with the new order (keeping current launch/land points).
-    Allow up to max_reorder_attempts restarts; on the final attempt, run full
-    max_iters with no further TSP checks.
+    Runs full max_iters for each attempt. After each attempt, solve TSP on 
+    launch locations. If order changes, start a new attempt with new order
+    (keeping current launch/land points). Up to max_reorder_attempts restarts.
     
-    Returns: (recs, best_obj, best_iter, num_attempts)
-        num_attempts is 1, 2, or 3 indicating how many times we started SOCP
+    Returns: (attempt_results, num_attempts)
+        attempt_results: list of AttemptResult for each attempt run
+        num_attempts: total number of attempts (1, 2, or 3)
     """
     n = len(order)
     if n == 0:
-        return [], init_obj if init_obj else 0.0, 0, 1
+        return [AttemptResult(1, order, init_obj if init_obj else 0.0, 0, [], [])], 1
 
     current_order = list(order)
     launch_cur = [list(L0_list[i]) for i in range(n)]
     return_cur = [list(R0_list[i]) for i in range(n)]
     
-    recs = []
-    best_val = float("inf")
-    if init_obj is not None and init_obj < float("inf"):
-        best_val = init_obj
-    best_iter = 0
-    
-    total_iter_offset = 0
-    final_attempt = 1
+    attempt_results = []
     
     for attempt in range(max_reorder_attempts + 1):
-        final_attempt = attempt + 1  # 1-indexed
-        is_final_attempt = (attempt == max_reorder_attempts)
+        attempt_num = attempt + 1
+        recs = []
         
-        if is_final_attempt:
-            # Final attempt: run full max_iters, no TSP check
-            best_val, best_iter, success = _run_socp_iterations(
-                instance, current_order, launch_cur, return_cur,
-                num_iters=max_iters,
-                iter_offset=total_iter_offset,
-                shrink_freedom=shrink_freedom,
-                base_verts=base_verts,
-                Dvv=Dvv,
-                best_val=best_val,
-                best_iter=best_iter,
-                on_iteration=on_iteration,
-                recs=recs,
-                return_points=return_points
-            )
+        best_val, best_iter, success = _run_socp_iterations(
+            instance, current_order, launch_cur, return_cur,
+            num_iters=max_iters,
+            shrink_freedom=shrink_freedom,
+            base_verts=base_verts,
+            Dvv=Dvv,
+            on_iteration=on_iteration,
+            recs=recs,
+            return_points=return_points,
+            attempt_num=attempt_num
+        )
+        
+        final_Ls = [(float(launch_cur[i][0]), float(launch_cur[i][1])) for i in range(n)]
+        final_Rs = [(float(return_cur[i][0]), float(return_cur[i][1])) for i in range(n)]
+        
+        attempt_results.append(AttemptResult(
+            attempt_num=attempt_num,
+            order=current_order[:],
+            best_obj=best_val,
+            best_iter=best_iter,
+            final_Ls=final_Ls,
+            final_Rs=final_Rs,
+            recs=recs
+        ))
+        
+        if not success:
+            break
+        
+        # Don't check TSP on final attempt
+        if attempt == max_reorder_attempts:
+            break
+        
+        # Solve TSP on current launch locations
+        new_pos_sequence = solve_tsp_on_launches(
+            instance, final_Ls, base_verts, Dvv, seed=attempt
+        )
+        
+        # Check if order changed
+        new_order = [current_order[j] for j in new_pos_sequence]
+        
+        if new_order == current_order:
+            # Order stable, we're done
             break
         else:
-            # Run reorder_iters iterations
-            best_val, best_iter, success = _run_socp_iterations(
-                instance, current_order, launch_cur, return_cur,
-                num_iters=reorder_iters,
-                iter_offset=total_iter_offset,
-                shrink_freedom=shrink_freedom,
-                base_verts=base_verts,
-                Dvv=Dvv,
-                best_val=best_val,
-                best_iter=best_iter,
-                on_iteration=on_iteration,
-                recs=recs,
-                return_points=return_points
-            )
+            # Order changed, reorder for next attempt
+            new_launch = [launch_cur[j] for j in new_pos_sequence]
+            new_return = [return_cur[j] for j in new_pos_sequence]
             
-            if not success:
-                break
-            
-            # Solve TSP on current launch locations
-            Ls_current = [(float(launch_cur[i][0]), float(launch_cur[i][1])) for i in range(n)]
-            new_pos_sequence = solve_tsp_on_launches(
-                instance, Ls_current, base_verts, Dvv, seed=attempt
-            )
-            
-            # Check if order changed
-            new_order = [current_order[j] for j in new_pos_sequence]
-            
-            if new_order == current_order:
-                # Order stable, finish remaining iterations
-                remaining = max_iters - reorder_iters
-                if remaining > 0:
-                    total_iter_offset += reorder_iters
-                    best_val, best_iter, success = _run_socp_iterations(
-                        instance, current_order, launch_cur, return_cur,
-                        num_iters=remaining,
-                        iter_offset=total_iter_offset,
-                        shrink_freedom=shrink_freedom,
-                        base_verts=base_verts,
-                        Dvv=Dvv,
-                        best_val=best_val,
-                        best_iter=best_iter,
-                        on_iteration=on_iteration,
-                        recs=recs,
-                        return_points=return_points
-                    )
-                break
-            else:
-                # Order changed, reorder and restart
-                new_launch = [launch_cur[j] for j in new_pos_sequence]
-                new_return = [return_cur[j] for j in new_pos_sequence]
-                
-                current_order = new_order
-                launch_cur = [[p[0], p[1]] for p in new_launch]
-                return_cur = [[p[0], p[1]] for p in new_return]
-                
-                # Reset iteration counter for fresh start
-                total_iter_offset = 0
-                recs.clear()
+            current_order = new_order
+            launch_cur = [[p[0], p[1]] for p in new_launch]
+            return_cur = [[p[0], p[1]] for p in new_return]
 
-    return recs, best_val, best_iter, final_attempt
+    return attempt_results, len(attempt_results)
 
 
 def ship_true_length(instance: Instance, order: List[int], Ls: List[Point], Rs: List[Point], base_verts, base_adj) -> float:

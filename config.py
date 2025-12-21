@@ -11,7 +11,6 @@ class Config:
     shrink_freedom: float = 1.0  # SOCP freedom region as fraction of distance to nearest obstacle
     obs_margin: float = 0.1  # distance subtracted from freedom radii to prevent strange behavior
     max_iters: int = 25
-    reorder_iters: int = 10  # Run this many SOCP iters before checking if TSP order changed
     max_reorder_attempts: int = 2  # Max times to restart if order changes (0 to disable reordering)
 
     num_targets_list: List[int] = field(default_factory=lambda: [5, 10, 15, 20, 25])
