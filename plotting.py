@@ -137,16 +137,15 @@ def plot_iter(
     plt.close(fig)
 
     if title is not None:
-        try:
-            it = int(title[5:7])
-        except ValueError:
-            it = 0
+        import re
+        match = re.search(r'Iter\s*(\d+)', title)
+        if match:
+            it = int(match.group(1))
+        else:
+            raise ValueError(f"Could not parse iteration number from title: {title}")
         # Create subfolder for this instance's iteration CSVs
         iter_csv_dir = os.path.join(route_info_dir, instance.name)
         _write_route_csv(instance, order, Ls, Rs, ship_points, iter_csv_dir, iteration=it, obj_value=obj_value)
-        # Also write to main route_info for final iteration
-        if it == max_iters:
-            _write_route_csv(instance, order, Ls, Rs, ship_points, route_info_dir, obj_value=obj_value)
 
 
 def _write_route_csv(instance: Instance, order: List[int], Ls: List[Point], Rs: List[Point], ship_points: List[Point], route_info_dir: str, iteration: Optional[int] = None, obj_value: Optional[float] = None):

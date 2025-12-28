@@ -10,16 +10,20 @@ class Config:
     shrink_factor: float = 0.9  # Initial candidate ring radius as fraction of max feasible
     shrink_freedom: float = 1.0  # SOCP freedom region as fraction of distance to nearest obstacle
     obs_margin: float = 0.1  # distance subtracted from freedom radii to prevent strange behavior
-    max_iters: int = 25
+    max_iters: int = 50
+    socp_stop_threshold: float = 0.0001  # Stop SOCP when improvement is below this
 
-    num_targets_list: List[int] = field(default_factory=lambda: [5, 10, 15, 20, 25])
-    num_obstacles_list: List[int] = field(default_factory=lambda: [5, 10, 15, 20, 25])
+    # Ship weight multipliers for objective function
+    obj_weights_ship: List[float] = field(default_factory=lambda: [1.1, 2.0, 5.0])
+
+    num_targets_list: List[int] = field(default_factory=lambda: [10])
+    num_obstacles_list: List[int] = field(default_factory=lambda: [5, 10, 15, 20])
     allow_overlap: bool = False  # controls whether obstacles are allowed to overlap
     seeds: List[int] = field(default_factory=lambda: list(range(25)))
 
     # Custom instances: if non-empty, run these instead of random grid
     custom_instances: List[str] = field(default_factory=list)
-    # custom_instances: List[str] = field(default_factory=lambda: ["fig5_approx_instance"])
+    # custom_instances: List[str] = field(default_factory=lambda: ["pentagon_pyramid"])
     custom_instances_dir: str = "custom_instances"
 
     orig: tuple = (-10.0, -10.0)

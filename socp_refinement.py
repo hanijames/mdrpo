@@ -14,14 +14,16 @@ def refine_by_socp(
     order: List[int],
     L0_list: List[Point],
     R0_list: List[Point],
-    max_iters: int = 25,
+    max_iters: int = 50,
     shrink_freedom: float = 1.0,
     base_verts=None,
     base_adj=None,
     Dvv: Optional[np.ndarray] = None,
     init_obj: Optional[float] = None,
     return_points: bool = False,
-    on_iteration=None
+    on_iteration=None,
+    stop_threshold: float = 0.0001,
+    ship_weight: float = 1.0
 ) -> Tuple[List[Dict], float, int]:
     target = [instance.targets[i] for i in order]
     n = len(target)
@@ -32,6 +34,7 @@ def refine_by_socp(
     if init_obj is not None and init_obj < float("inf"):
         best_val = init_obj
     best_iter = 0
+    prev_obj = best_val
 
     for it in range(1, max_iters + 1):
         launch_prev = [(float(launch_cur[i][0]), float(launch_cur[i][1])) for i in range(n)]
@@ -48,19 +51,19 @@ def refine_by_socp(
         # Ship segments between waypoints use wet distance (path around obstacles)
         first_obst, last_obst, wrd = first_last_turn(instance.orig, launch_prev[0], instance.obstacles, base_verts, Dvv)
         if first_obst is None:
-            objective += cp.norm(cp.Constant(instance.orig) - launch_var[0])
+            objective += ship_weight * cp.norm(cp.Constant(instance.orig) - launch_var[0])
         else:
-            objective += cp.norm(cp.Constant(instance.orig) - cp.Constant(first_obst))
-            objective += cp.Constant(wrd)
-            objective += cp.norm(cp.Constant(last_obst) - launch_var[0])
+            objective += ship_weight * cp.norm(cp.Constant(instance.orig) - cp.Constant(first_obst))
+            objective += ship_weight * cp.Constant(wrd)
+            objective += ship_weight * cp.norm(cp.Constant(last_obst) - launch_var[0])
 
         first_obst, last_obst, wrd = first_last_turn(return_prev[-1], instance.dest, instance.obstacles, base_verts, Dvv)
         if first_obst is None:
-            objective += cp.norm(cp.Constant(instance.dest) - return_var[-1])
+            objective += ship_weight * cp.norm(cp.Constant(instance.dest) - return_var[-1])
         else:
-            objective += cp.norm(return_var[-1] - cp.Constant(first_obst))
-            objective += cp.Constant(wrd)
-            objective += cp.norm(cp.Constant(last_obst) - cp.Constant(instance.dest))
+            objective += ship_weight * cp.norm(return_var[-1] - cp.Constant(first_obst))
+            objective += ship_weight * cp.Constant(wrd)
+            objective += ship_weight * cp.norm(cp.Constant(last_obst) - cp.Constant(instance.dest))
 
         for i in range(n):
             target_i = cp.Constant(target[i])
@@ -77,15 +80,15 @@ def refine_by_socp(
             else:
                 constraints += [cp.norm(launch_var[i] - cp.Constant(first_obst_s)) + cp.Constant(wrd_s) + cp.norm(return_var[i] - cp.Constant(last_obst_s)) <= cp.Constant(instance.R)]
                 ship_time = cp.norm(launch_var[i] - cp.Constant(first_obst_s)) + cp.Constant(wrd_s) + cp.norm(return_var[i] - cp.Constant(last_obst_s))
-            objective += cp.maximum(drone_time, ship_time)
+            objective += cp.maximum(drone_time, ship_weight * ship_time)
             if i + 1 < n:
                 first_obst_c, last_obst_c, wrd_c = first_last_turn(return_prev[i], launch_prev[i + 1], instance.obstacles, base_verts, Dvv)
                 if first_obst_c is None:
-                    objective += cp.norm(return_var[i] - launch_var[i + 1])
+                    objective += ship_weight * cp.norm(return_var[i] - launch_var[i + 1])
                 else:
-                    objective += cp.norm(return_var[i] - cp.Constant(first_obst_c))
-                    objective += cp.norm(launch_var[i + 1] - cp.Constant(last_obst_c))
-                    objective += cp.Constant(wrd_c)
+                    objective += ship_weight * cp.norm(return_var[i] - cp.Constant(first_obst_c))
+                    objective += ship_weight * cp.norm(launch_var[i + 1] - cp.Constant(last_obst_c))
+                    objective += ship_weight * cp.Constant(wrd_c)
 
         problem = cp.Problem(cp.Minimize(objective), constraints)
         problem.solve()
@@ -116,6 +119,11 @@ def refine_by_socp(
             if obj_value < best_val:
                 best_val = obj_value
                 best_iter = it
+            
+            improvement = prev_obj - obj_value
+            if improvement < stop_threshold:
+                break
+            prev_obj = obj_value
 
     return recs, best_val, best_iter
 
@@ -129,3 +137,24 @@ def ship_true_length(instance: Instance, order: List[int], Ls: List[Point], Rs: 
         prev = Rs[k]
     s += wet_distance(prev, instance.dest, base_verts, base_adj, instance.obstacles)
     return s
+
+
+def compute_total_time(instance: Instance, order: List[int], Ls: List[Point], Rs: List[Point],
+                       base_verts, base_adj) -> float:
+    """Compute the original total time objective (ship_weight=1)."""
+    total = 0.0
+    
+    total += wet_distance(instance.orig, Ls[0], base_verts, base_adj, instance.obstacles)
+    
+    for i, idx in enumerate(order):
+        target = instance.targets[idx]
+        drone_time = (dist(Ls[i], target) + dist(Rs[i], target)) / instance.alpha
+        ship_time = wet_distance(Ls[i], Rs[i], base_verts, base_adj, instance.obstacles)
+        total += max(drone_time, ship_time)
+        
+        if i + 1 < len(order):
+            total += wet_distance(Rs[i], Ls[i + 1], base_verts, base_adj, instance.obstacles)
+    
+    total += wet_distance(Rs[-1], instance.dest, base_verts, base_adj, instance.obstacles)
+    
+    return total
