@@ -114,3 +114,59 @@ def initial_solution(
         "order": order, "chosen_return": chosen_return, "chosen_launch": chosen_launch,
         "candidate_map": candidate_map, "base_verts": base_verts, "base_adj": base_adj, "Dvv": Dvv, "Next": Next
     }
+
+
+def initial_solutions_multi(
+    instance: Instance, ring_resolution: int = 10, shrink_factor: float = 0.9,
+    time_limit: Optional[float] = 12000, max_seeds: int = 25, target_starts: int = 5
+) -> List[Dict]:
+    """
+    Run GTSP with multiple seeds and return all distinct solutions.
+    
+    Tries up to max_seeds seeds, stops early if target_starts distinct solutions found.
+    Returns a list of solution dicts (same format as initial_solution),
+    sorted by Init Obj (best first). Only distinct orders are kept.
+    """
+    base_verts, base_adj = build_los_graph(instance.obstacles)
+    Dvv, Next = apsp_vertices_with_next(base_adj)
+    candidate_map = build_candidate_map(instance, resolution=ring_resolution, shrink_factor=shrink_factor)
+    
+    seen_orders = set()
+    solutions = []
+    
+    for seed in range(max_seeds):
+        if len(solutions) >= target_starts:
+            break
+            
+        order, chosen_return, chosen_launch, ship_cost = solve_gtsp_lkh(
+            instance, candidate_map, base_verts, Dvv, time_limit=time_limit, seed=seed
+        )
+        
+        # Check if this order (or its reverse) is already seen
+        order_tuple = tuple(order)
+        order_rev_tuple = tuple(reversed(order))
+        
+        if order_tuple in seen_orders or order_rev_tuple in seen_orders:
+            continue
+        
+        seen_orders.add(order_tuple)
+        
+        # Compute objective
+        wait = 0.0
+        for k, idx in enumerate(order):
+            launch = chosen_launch[k]
+            target = instance.targets[idx]
+            wait += (2.0 * math.hypot(launch[0] - target[0], launch[1] - target[1]) / instance.alpha)
+        init_obj = ship_cost + wait
+        
+        solutions.append({
+            "Init Obj": init_obj, "Ship Cost": ship_cost,
+            "order": order, "chosen_return": chosen_return, "chosen_launch": chosen_launch,
+            "candidate_map": candidate_map, "base_verts": base_verts, "base_adj": base_adj, 
+            "Dvv": Dvv, "Next": Next, "seed": seed
+        })
+    
+    # Sort by objective (best first)
+    solutions.sort(key=lambda s: s["Init Obj"])
+    
+    return solutions

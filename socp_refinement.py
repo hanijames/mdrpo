@@ -14,15 +14,23 @@ def refine_by_socp(
     order: List[int],
     L0_list: List[Point],
     R0_list: List[Point],
-    max_iters: int = 25,
+    max_iters: int = 50,
     shrink_freedom: float = 1.0,
     base_verts=None,
     base_adj=None,
     Dvv: Optional[np.ndarray] = None,
     init_obj: Optional[float] = None,
     return_points: bool = False,
-    on_iteration=None
+    on_iteration=None,
+    stop_threshold: float = 0.0001
 ) -> Tuple[List[Dict], float, int]:
+    """
+    Refine launch/return points via successive SOCP iterations.
+    
+    Stops early if improvement between iterations is below stop_threshold.
+    
+    Returns: (recs, best_obj, best_iter)
+    """
     target = [instance.targets[i] for i in order]
     n = len(target)
     launch_cur = [list(L0_list[i]) for i in range(n)]
@@ -32,6 +40,7 @@ def refine_by_socp(
     if init_obj is not None and init_obj < float("inf"):
         best_val = init_obj
     best_iter = 0
+    prev_obj = best_val
 
     for it in range(1, max_iters + 1):
         launch_prev = [(float(launch_cur[i][0]), float(launch_cur[i][1])) for i in range(n)]
@@ -113,9 +122,16 @@ def refine_by_socp(
         recs.append(rec)
 
         if math.isfinite(obj_value):
+            improvement = prev_obj - obj_value
             if obj_value < best_val:
                 best_val = obj_value
                 best_iter = it
+            
+            # Check for early stopping
+            if improvement < stop_threshold:
+                break
+            
+            prev_obj = obj_value
 
     return recs, best_val, best_iter
 
