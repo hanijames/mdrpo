@@ -191,7 +191,7 @@ def append_results_csv_multi(num_targets: int, num_obst: int, seed: int,
         w = csv.writer(f)
         if need_header:
             header = ["seed"]
-            for i in range(1, 6):  # Up to 5 starts
+            for i in range(1, len(all_results)+1):  # Up to 10 starts
                 header.extend([f"init_obj_start{i}", f"best_obj_start{i}", f"order_start{i}"])
             header.extend(["overall_best_obj", "overall_best_start"])
             w.writerow(header)
@@ -199,7 +199,7 @@ def append_results_csv_multi(num_targets: int, num_obst: int, seed: int,
         row = [seed]
         
         # Add data for each possible start (1-5)
-        for start_num in range(1, 6):
+        for start_num in range(1, len(all_results)+1):
             matching = [r for r in all_results if r["start_num"] == start_num]
             if matching:
                 r = matching[0]
